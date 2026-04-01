@@ -16,6 +16,33 @@ from typing import Dict, List
 from torch.utils.data import Dataset
 import torch
 
+from pathlib import Path
+
+def load_raw_data(split: str, data_dir="datasets") -> List[str]:
+    """Function to recursively load all the text in the .sent_split files for a specific split
+    
+        Args:
+            - split: specify which split is to be loaded
+                -> Choose from 'train', 'dev', or 'test'
+    """
+
+    root_dir = Path(__file__).resolve().parent
+    
+    data_path = root_dir / data_dir
+    
+    raw_texts = []
+
+    # Search recursively in all folders the files corresponding to the correct data split
+    for file in data_path.rglob(f"*{split}*.sent_split"):
+        print(f"Reading : {file.name}")
+        
+        with open(file, 'r', encoding='utf-8') as f:
+            content = f.read()
+            if content.strip():
+                raw_texts.append(content)
+                
+    return raw_texts
+
 def prepare_text(full_text: str, tokenizer: AutoTokenizer) -> Dict[str, List]:
     """Function to transform raw text from the datasets into tokenized vector + label vector
         
@@ -82,6 +109,9 @@ class EOSDataset(Dataset):
                 window_ids   = input_ids[start:end]
                 window_mask  = attention_mask[start:end]
                 window_labels = labels[start:end]
+
+                window_labels[0]  = -100 # Ignoring both [CLS] and [SEP] tokens
+                window_labels[-1] = -100
 
                 # We add some padding if the previous window is too short
                 pad_len = max_length - len(window_ids)
