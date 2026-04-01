@@ -12,10 +12,21 @@ Tasks to carry out:
 
 import re
 from transformers import AutoTokenizer
+from typing import Dict, List
+from torch.utils.data import Dataset
+import torch
 
-tokenizer = AutoTokenizer.from_pretrained('bert-base-multilingual-cased') # Multilingual tokenizer
-
-def prepare_text(full_text, tokenizer):
+def prepare_text(full_text: str, tokenizer: AutoTokenizer) -> Dict[str, List]:
+    """Function to transform raw text from the datasets into tokenized vector + label vector
+        
+        Input:
+            - full_text: raw string containing <EOS> tokens
+            - tokenizer: the tokenizer object used for splitting the sentences
+        
+        Output: A dictionnary containing:
+            - input_ids:  List of tokens ids representing the full text
+            - attention_mask: Useful if we need padding
+            - labels: List of prediction goals: 1 if the token ends a sentence, else 0"""
     
     # 1. find the position of all <EOS> and delete them
     eos_pos = set()
@@ -51,10 +62,52 @@ def prepare_text(full_text, tokenizer):
     }
 
 
+class EOSDataset(Dataset):
+    """Child class of regular Pytorch dataset to feed our optimization loop"""
+
+    def __init__(self, raw_texts: List[str], tokenizer: AutoTokenizer, max_length=512, stride=256):
+        self.samples = []
+
+        for text in raw_texts:
+            encoded = prepare_text(text, tokenizer)
+
+            input_ids = encoded["input_ids"]
+            attention_mask = encoded["attention_mask"]
+            labels = encoded["labels"]
+
+            # Need to split up the whole sequence as BERT only proceses a maximum of 512 tokens
+            for start in range(0, len(input_ids), stride):
+                end = start + max_length
+                
+                window_ids   = input_ids[start:end]
+                window_mask  = attention_mask[start:end]
+                window_labels = labels[start:end]
+
+                # We add some padding if the previous window is too short
+                pad_len = max_length - len(window_ids)
+                if pad_len > 0:
+                    window_ids    = window_ids    + [tokenizer.pad_token_id] * pad_len
+                    window_mask   = window_mask   + [0] * pad_len
+                    window_labels = window_labels + [-100] * pad_len
+                    # -100 are ignored by the loss
+
+                self.samples.append({
+                    "input_ids":      torch.tensor(window_ids),
+                    "attention_mask": torch.tensor(window_mask),
+                    "labels":         torch.tensor(window_labels),
+                })
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        return self.samples[idx]
 
 if __name__ == "__main__":
 
     # Playing with function for debugging
+
+    tokenizer = AutoTokenizer.from_pretrained('bert-base-multilingual-cased') # Multilingual tokenizer
 
     sample = """From the AP comes this story :<EOS> 
 
@@ -76,3 +129,6 @@ if __name__ == "__main__":
     tokens = tokenizer.convert_ids_to_tokens(result["input_ids"])
     print(tokens)
     print(result['labels'])
+
+    dataset = EOSDataset([sample],tokenizer)
+    print(dataset.__getitem__(0))
