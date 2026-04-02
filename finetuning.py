@@ -14,7 +14,8 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
-model_name = "bert-base-multilingual-cased"
+### Model choice 
+model_name = "bert-base-multilingual-cased" # Same small multilingual encoder
 model = AutoModelForTokenClassification.from_pretrained(model_name, num_labels=2)
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -23,6 +24,8 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 for param in model.bert.parameters():
     param.requires_grad = False
 
+
+### Data preparation
 raw_train = load_raw_data(split='test')
 raw_val = load_raw_data(split='dev')
 
@@ -33,22 +36,27 @@ train_loader = DataLoader(train_set,batch_size=16,shuffle=True)
 val_loader = DataLoader(val_set,batch_size=16,shuffle=True)
 
 
+### Optimization hyperparameters
+# We begin with high lr + scheduler for faster convergence under limited resources
+
 optimizer = AdamW(model.parameters(), lr=1e-3)
-# LR élevé car on n'entraîne que la tête — pas de risque de catastrophic forgetting
 
 scheduler = ReduceLROnPlateau(optimizer, mode='max', patience=2, factor=0.5)
 
-# Define our own weighted loss
+
+### Defining a custom weighted loss to account for very heavy class imbalance!
 n_zeros = sum((b["labels"] == 0).sum().item() for b in train_loader)
 n_ones  = sum((b["labels"] == 1).sum().item() for b in train_loader)
-ratio   = n_zeros / n_ones  # ~40x dans ton cas
+ratio   = n_zeros / n_ones  
 print(f"Ratio 0/1 : {ratio:.1f}")
 
-loss_fn = nn.CrossEntropyLoss(
+weighted_loss = nn.CrossEntropyLoss(
     weight=torch.tensor([1.0, ratio]),
-    ignore_index=-100         
+    ignore_index=-100  # ingnoring padding!
 )
 
+
+### Very simple/standard optimization loop (borrowed from previous projetcs)
 NUM_EPOCHS = 25
 pbar = tqdm(range(NUM_EPOCHS))
 
@@ -56,7 +64,7 @@ for epoch in pbar:
 
     pbar.set_description(f"Training epoch {epoch + 1}/{NUM_EPOCHS}")
 
-    # --- Training ---
+    # Training step
     model.train()
     total_loss = 0
 
@@ -71,8 +79,8 @@ for epoch in pbar:
         logits = outputs.logits
         labels = batch["labels"]
 
-        # Reshape pour CrossEntropyLoss : (batch*seq_len, 2) et (batch*seq_len,)
-        loss = loss_fn(
+        # Reshape for CrossEntropy
+        loss = weighted_loss(
             logits.view(-1, 2),
             labels.view(-1),
         )
@@ -81,33 +89,36 @@ for epoch in pbar:
         optimizer.step()
         total_loss += loss.item()
 
-    # --- Validation ---
+    # Validation step
     model.eval()
     all_preds, all_true = [], []
 
     with torch.no_grad():
         for batch in val_loader:
             outputs = model(
-                input_ids=      batch["input_ids"],
-                attention_mask= batch["attention_mask"],
+                input_ids = batch["input_ids"],
+                attention_mask = batch["attention_mask"],
             )
-            preds = outputs.logits.argmax(dim=-1)  # (batch, seq_len)
 
-            # Flatten et filtre les -100
+            preds = outputs.logits.argmax(dim=-1) 
+
+            # Flattenning labels + ignoring -100 from padding
             for i in range(len(batch["labels"])):
                 for j in range(len(batch["labels"][i])):
                     if batch["labels"][i][j] != -100:
                         all_preds.append(preds[i][j].item())
                         all_true.append(batch["labels"][i][j].item())
 
-    f1 = f1_score(all_true, all_preds)
-    scheduler.step(f1)
-    print(f"Epoch {epoch+1} — loss: {total_loss/len(train_loader):.4f}  F1: {f1:.4f}")
+    f1 = f1_score(all_true, all_preds) # F1 -> preferred metric because class imbalance
 
-    # Stopping criterion
+    scheduler.step(f1)
+
+    print(f"Epoch {epoch+1} - loss: {total_loss/len(train_loader):.4f}  F1: {f1:.4f}")
+
+    # Stopping criterion (never achieved, but for good measure)
     if f1 > 0.98:
         break
 
 
 ## Saving model
-torch.save(model.classifier.state_dict(), "eos_head.pt")
+torch.save(model.classifier.state_dict(), "weights/eos_head.pt")

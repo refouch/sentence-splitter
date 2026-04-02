@@ -43,6 +43,7 @@ def load_raw_data(split: str, data_dir="datasets") -> List[str]:
                 
     return raw_texts
 
+
 def prepare_text(full_text: str, tokenizer: AutoTokenizer) -> Dict[str, List]:
     """Function to transform raw text from the datasets into tokenized vector + label vector
         
@@ -53,7 +54,8 @@ def prepare_text(full_text: str, tokenizer: AutoTokenizer) -> Dict[str, List]:
         Output: A dictionnary containing:
             - input_ids:  List of tokens ids representing the full text
             - attention_mask: Useful if we need padding
-            - labels: List of prediction goals: 1 if the token ends a sentence, else 0"""
+            - labels: List of prediction goals: 1 if the token ends a sentence, else 0
+            - offset_mapping: List of character offset created by tokenizer. Useful later to compare with spacy"""
     
     # 1. find the position of all <EOS> and delete them
     eos_pos = set()
@@ -78,19 +80,21 @@ def prepare_text(full_text: str, tokenizer: AutoTokenizer) -> Dict[str, List]:
     # 3. Use the offsets computed by the tokenizer to map the real sentece endings
     offsets = encoding["offset_mapping"]
     labels = [
-        1 if end > 0 and end in eos_pos else 0
+        1 if end > 0 and end in eos_pos else 0 # 1 if the ending character of a token is in the previously marked EOS positions
         for (start, end) in offsets
     ]
 
     return {
-        "input_ids":      encoding["input_ids"],
+        "input_ids": encoding["input_ids"],
         "attention_mask": encoding["attention_mask"],
-        "labels":         labels,
+        "labels": labels,
+        "offset_mapping": encoding['offset_mapping']
     }
 
 
 class EOSDataset(Dataset):
-    """Child class of regular Pytorch dataset to feed our optimization loop"""
+    """Child class of regular Pytorch dataset to feed our optimization loop.
+        Mainly useful to split our big text into chunks of tokens manageable for BERT"""
 
     def __init__(self, raw_texts: List[str], tokenizer: AutoTokenizer, max_length=512, stride=256):
         self.samples = []
@@ -103,6 +107,7 @@ class EOSDataset(Dataset):
             labels = encoded["labels"]
 
             # Need to split up the whole sequence as BERT only proceses a maximum of 512 tokens
+            # We add padding + stride -> if the cut happens in the middle of a sentence this creates overlap so that each batch has the full context
             for start in range(0, len(input_ids), stride):
                 end = start + max_length
                 
