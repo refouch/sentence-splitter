@@ -20,6 +20,8 @@ Without going into detail, here is a quick overview of the choices that were mad
 
 - **Dealing with class imbalance:** We chose Binary CrossEntropy as our loss function, **weighted by each class ocurence ratio** to counter the enormous class imbalance in the dataset (way more tokens that are NOT ending a sentence). For our validation loop we use **F1-score** as the preffered metric, way more informative than just accuracy this case.
 
+- **Mitigating False positives:** As further detailed in the notebook, our model is really prone to FP. To help mitigate that we decided to move the decision boudary from 0.5 to 0.7 to help eliminate the tokens with weaker positive probability. 
+
 Other smaller methodological choices are justified in the code comments
 
 ## 2. Results
