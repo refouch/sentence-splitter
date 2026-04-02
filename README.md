@@ -24,6 +24,24 @@ Other smaller methodological choices are justified in the code comments
 
 ## 2. Results
 
+Goal was to beat Spacy, our final model barely achieves that on the provided test set.
+
+| Metric | Our Model (Threshold 0.7) | spaCy (Statistical) |
+| :--- | :---: | :---: |
+| **Precision** | 0.79 | 0.96 |
+| **Recall** | 0.97 | 0.76 |
+| **F1-Score** | 0.87 | 0.85 |
+| **Macro Avg F1** | 0.93 | 0.92 |
+
+---
+
+**Short analysis** (a more detailed one is provided in the inference notebook)
+
+Spacy shows a higher precision when our model is more prone to false positives (splitting where it shouldn't). Indeed our model tends to be very conservative and thus outperforms Spacy in recall. TDLR: Spacy misses a lot of sentence endings, our model splits too much.
+Overall, our model is still more balanced getting a highr F1-score. As detailed further in the notebook, this is likely due to the nature of the dataset used and maybe Spacy would outperform in another context.
+
+Still, theses results are honorable and i am satisfied with it. They could probabily be improved by unfreezing the base model and not just training the head.
+
 ## 3. Reproducing the results
 
 First, clone this repo.
